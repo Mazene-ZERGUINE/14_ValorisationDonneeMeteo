@@ -11,6 +11,8 @@ SELECT
     s.is_public,
     s.classe_recente,
     s.annee_de_creation,
-    s.annee_de_fermeture
+    s.annee_de_fermeture,
+    s.first_temperature_date
 FROM public.v_station_classe_4 s
+WHERE s.first_temperature_date < '1997-01-01T00:00:00+00:00'
 ORDER BY s.station_code;
