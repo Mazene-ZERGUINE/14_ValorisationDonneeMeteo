@@ -44,6 +44,7 @@ class Station(models.Model):
 
     annee_de_creation = models.IntegerField()
     annee_de_fermeture = models.IntegerField(null=True, blank=True)
+    first_temperature_date = TimestampAsDateField()
 
     class Meta:
         managed = False

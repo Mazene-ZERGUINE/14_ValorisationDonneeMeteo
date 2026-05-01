@@ -54,6 +54,15 @@ from .serializers import (
     list=extend_schema(
         summary="Liste des stations",
         description="Retourne la liste des stations meteorologiques.",
+        parameters=[
+            OpenApiParameter(
+                "first_temperature_year_max",
+                int,
+                OpenApiParameter.QUERY,
+                required=False,
+                description="Année maximale de `first_temperature_date` pour filtrer les stations.",
+            )
+        ],
         tags=["Stations"],
     ),
     retrieve=extend_schema(
