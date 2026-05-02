@@ -23,9 +23,6 @@ export const REGION_META = {
 export const TABLE_HEADER_BTN_CLASS =
     "-mx-2.5 font-semibold text-highlighted w-full justify-center text-base";
 
-export const TABLE_HEADER_BTN_MULTILINE_CLASS =
-    "-mx-2.5 font-semibold text-highlighted w-full justify-center whitespace-normal leading-tight text-center text-base";
-
 export const EXPORT_BTN_UI = {
     base: "bg-slate-450 ring-1 ring-blue-350 text-white",
 };
@@ -70,19 +67,29 @@ export function makeSortableColFactory<T>(
             header: options.headerCustom
                 ? options.headerCustom
                 : () =>
-                      h(UButton, {
-                          variant: "ghost",
-                          label,
-                          title: label,
-                          trailingIcon: ordering.value.includes(sortKey)
-                              ? ordering.value.startsWith("-")
-                                  ? "i-lucide-arrow-down"
-                                  : "i-lucide-arrow-up"
-                              : "i-lucide-arrow-up-down",
-                          color: "neutral",
-                          class: TABLE_HEADER_BTN_CLASS,
-                          onClick: () => setOrdering(sortKey),
-                      }),
+                      h(
+                          UButton,
+                          {
+                              variant: "ghost",
+                              label,
+                              title: label,
+                              trailingIcon: ordering.value.includes(sortKey)
+                                  ? ordering.value.startsWith("-")
+                                      ? "i-lucide-arrow-down"
+                                      : "i-lucide-arrow-up"
+                                  : "i-lucide-arrow-up-down",
+                              color: "neutral",
+                              class: TABLE_HEADER_BTN_CLASS,
+                              onClick: () => setOrdering(sortKey),
+                          },
+                          () =>
+                              h(
+                                  "span",
+                                  { class: "whitespace-pre-line" },
+                                  label,
+                              ),
+                      ),
+
             cell: options.cellCustom ? options.cellCustom : undefined,
             ...(options.meta ? { meta: options.meta } : {}),
         };
