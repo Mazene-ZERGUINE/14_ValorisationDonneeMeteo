@@ -37,14 +37,9 @@ urlpatterns = [
         name="temperature-records",
     ),
     path(
-        "temperature/extremes/graph",
-        TemperatureMinMaxGraphAPIView.as_view(),
-        name="temperature-extremes-graph",
-    ),
-    path(
-        "temperature/deviation/graph",
-        TemperatureDeviationGraphAPIView.as_view(),
-        name="temperature-deviation-graph",
+        "temperature/records/graph",
+        RecordsGraphAPIView.as_view(),
+        name="temperature-records-graph",
     ),
     path(
         "temperature/deviation",
@@ -52,8 +47,13 @@ urlpatterns = [
         name="temperature-deviation-overview",
     ),
     path(
-        "temperature/records/graph",
-        RecordsGraphAPIView.as_view(),
-        name="temperature-records-graph",
+        "temperature/deviation/graph",
+        TemperatureDeviationGraphAPIView.as_view(),
+        name="temperature-deviation-graph",
+    ),
+    path(
+        "temperature/extremes/graph",
+        TemperatureMinMaxGraphAPIView.as_view(),
+        name="temperature-extremes-graph",
     ),
 ]
