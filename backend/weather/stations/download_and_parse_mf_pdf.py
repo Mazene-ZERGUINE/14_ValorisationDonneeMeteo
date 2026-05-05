@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TypeAlias
@@ -11,6 +12,7 @@ from typing import TypeAlias
 import pdfplumber
 import requests
 from pdfminer.pdfexceptions import PDFException
+from pdfplumber.utils.exceptions import PdfminerException
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,18 +77,46 @@ ITN_STATIONS_IDS = (
 )
 
 
-def get_pdf_urls() -> list[str]:
-    api_url = "https://www.data.gouv.fr/api/1/datasets/67a1e85a366f75613f750296/"
+def get_pdf_urls_cache_path(script_dir: Path) -> Path:
+    return script_dir / "pdf_urls.json"
+
+
+def load_cached_pdf_urls(cache_file_path: Path) -> list[str]:
+    with open(cache_file_path, encoding="utf-8") as file:
+        return json.load(file)
+
+
+def fetch_urls(api_url: str) -> list[str]:
     response = requests.get(api_url)
     data = response.json().get("resources", [])
-    pdf_urls = [
+    return [
         res["url"] for res in data if res.get("url") and res.get("url").endswith(".pdf")
     ]
+
+
+def save_pdf_urls(pdf_urls: list[str], cache_file_path: Path) -> None:
+    ensure_directory_exists(cache_file_path)
+    with open(cache_file_path, mode="w", encoding="utf-8") as file:
+        json.dump(pdf_urls, file, indent=4, ensure_ascii=False)
+
+
+def get_pdf_urls(*, script_dir: Path, update: bool = False) -> list[str]:
+    api_url = "https://www.data.gouv.fr/api/1/datasets/67a1e85a366f75613f750296/"
+    cache_file_path = get_pdf_urls_cache_path(script_dir)
+
+    if cache_file_path.exists() and not update:
+        logger.debug("Reading cached PDF URLs from %s", cache_file_path)
+        return load_cached_pdf_urls(cache_file_path)
+
+    pdf_urls = fetch_urls(api_url)
+    save_pdf_urls(pdf_urls, cache_file_path)
     return pdf_urls
 
 
 def build_station_info_from_text(
-    station_id: StationCode, pdf_url: str, text: str
+    station_id: StationCode,
+    pdf_url: str,
+    text: str,
 ) -> StationInfo:
     classes = extract_classes(text)
     creation_date = extract_creation_date(text)
@@ -102,52 +132,77 @@ def build_station_info_from_text(
 
 
 def get_meteofrance_data_dict(
-    *, update_pdf=False, itn_only=False, max_pdfs=DEFAULT_MAX_PDFS_TO_READ
+    *,
+    update=False,
+    itn_only=False,
+    max_pdfs=DEFAULT_MAX_PDFS_TO_READ,
+    keep_pdf=False,
+    parallelism=1,
 ) -> dict[StationCode, StationInfo]:
     data_dict: dict[StationCode, StationInfo] = {}
-    count = 0
-    pdf_urls = get_pdf_urls()
     script_dir = Path(__file__).parent
+    pdf_urls = get_pdf_urls(script_dir=script_dir, update=update)
+    selected_stations: list[tuple[StationCode, str, int]] = []
+    seen_station_ids: set[StationCode] = set()
 
     for i, pdf_url in enumerate(pdf_urls, 1):
         station_id = extract_id(pdf_url)
 
         if (
             station_id is None
-            or station_id in data_dict
+            or station_id in seen_station_ids
             or (itn_only and station_id not in ITN_STATIONS_IDS)
         ):
             continue
 
-        if max_pdfs and count > max_pdfs:
-            return data_dict
+        seen_station_ids.add(station_id)
+        selected_stations.append((station_id, pdf_url, i))
 
-        count += 1
+    if max_pdfs:
+        selected_stations = selected_stations[:max_pdfs]
 
-        logger.info("Processing station %s (%d/%d)", station_id, i, len(pdf_urls))
+    total = len(selected_stations)
 
-        filename = script_dir / "pdfs" / f"file_{station_id}.pdf"
-        if not filename.exists() or update_pdf:
-            logger.debug("Downloading %s to %s", pdf_url, filename)
-            ensure_directory_exists(filename)
-            download_and_save_pdf(pdf_url, filename)
+    def process_station(
+        station_id: StationCode,
+        pdf_url: str,
+        position: int,
+    ) -> tuple[StationCode, StationInfo]:
+        logger.info("Processing station %s (%d/%d)", station_id, position, total)
 
-        try:
-            logger.debug("Extracting text from %s", filename)
-            text = extract_text_from_pdf(filename)
-            logger.debug("Extracted text from %s:\n%s", filename, text)
-            data_dict[station_id] = build_station_info_from_text(
-                station_id, pdf_url, text
+        station_info = get_station_info(
+            station_id=station_id,
+            pdf_url=pdf_url,
+            script_dir=script_dir,
+            update=update,
+            keep_pdf=keep_pdf,
+        )
+        return station_id, station_info
+
+    if parallelism <= 1:
+        for station_id, pdf_url, position in selected_stations:
+            resolved_station_id, station_info = process_station(
+                station_id=station_id,
+                pdf_url=pdf_url,
+                position=position,
             )
-        except (OSError, PDFException):
-            logger.warning("Failed to parse station %s, marking as failed", station_id)
-            data_dict[station_id] = StationInfo(
-                station_code=station_id,
-                url=pdf_url,
-                departement="failed",
-                creation_date="failed",
-                classes_temperature=[],
+            data_dict[resolved_station_id] = station_info
+        return data_dict
+
+    with ThreadPoolExecutor(max_workers=parallelism) as executor:
+        futures = [
+            executor.submit(
+                process_station,
+                station_id,
+                pdf_url,
+                position,
             )
+            for station_id, pdf_url, position in selected_stations
+        ]
+
+        for future in as_completed(futures):
+            station_id, station_info = future.result()
+            data_dict[station_id] = station_info
 
     return data_dict
 
@@ -164,6 +219,66 @@ def save_pdf(filename: Path, pdf_resp) -> None:
 def download_and_save_pdf(pdf_url: str, filename: Path) -> None:
     pdf_resp = get_pdf(pdf_url)
     save_pdf(filename, pdf_resp)
+
+
+def get_station_info(
+    *,
+    station_id: StationCode,
+    pdf_url: str,
+    script_dir: Path,
+    update: bool,
+    keep_pdf: bool,
+) -> StationInfo:
+    try:
+        text = get_station_text(
+            station_id=station_id,
+            pdf_url=pdf_url,
+            script_dir=script_dir,
+            update=update,
+            keep_pdf=keep_pdf,
+        )
+        return build_station_info_from_text(station_id, pdf_url, text)
+    except (OSError, PDFException, PdfminerException):
+        logger.warning("Failed to parse station %s, marking as failed", station_id)
+        return StationInfo(
+            station_code=station_id,
+            url=pdf_url,
+            departement="failed",
+            creation_date="failed",
+            classes_temperature=[],
+        )
+
+
+def get_station_text(
+    *,
+    station_id: StationCode,
+    pdf_url: str,
+    script_dir: Path,
+    update: bool,
+    keep_pdf: bool,
+) -> str:
+    txt_filename = script_dir / "txts" / f"file_{station_id}.txt"
+    pdf_filename = script_dir / "pdfs" / f"file_{station_id}.pdf"
+
+    if txt_filename.exists() and not update:
+        logger.debug("Reading text from %s", txt_filename)
+        return txt_filename.read_text(encoding="utf-8")
+
+    logger.debug("Downloading %s to %s", pdf_url, pdf_filename)
+    ensure_directory_exists(pdf_filename)
+    download_and_save_pdf(pdf_url, pdf_filename)
+
+    logger.debug("Extracting text from %s", pdf_filename)
+    text = extract_text_from_pdf(pdf_filename)
+    logger.debug("Extracted text from %s:\n%s", pdf_filename, text)
+
+    ensure_directory_exists(txt_filename)
+    txt_filename.write_text(text, encoding="utf-8")
+
+    if not keep_pdf:
+        pdf_filename.unlink(missing_ok=True)
+
+    return text
 
 
 def extract_text_from_pdf(filename: Path) -> str:
@@ -364,10 +479,16 @@ def parse_cli_args() -> argparse.Namespace:
         help="Increase verbosity; use -vvv or more to enable DEBUG (default: INFO).",
     )
     parser.add_argument(
-        "--update-pdf",
+        "--update",
         action="store_true",
         default=False,
-        help="Re-download PDF files even if they already exist locally (default: False).",
+        help="Refresh cached PDF URLs and re-download/re-extract station files even if text already exists locally (default: False).",
+    )
+    parser.add_argument(
+        "--save-pdf",
+        action="store_true",
+        default=False,
+        help="Keep downloaded PDF files after text extraction (default: False).",
     )
     parser.add_argument(
         "--itn",
@@ -389,6 +510,12 @@ def parse_cli_args() -> argparse.Namespace:
         dest="output_dir",
         help="Output directory (relative to cwd). Default: output/ next to this script.",
     )
+    parser.add_argument(
+        "--parallelism",
+        type=int,
+        default=1,
+        help="Number of stations to process in parallel (default: 1).",
+    )
     return parser.parse_args()
 
 
@@ -396,6 +523,9 @@ def main() -> None:
     args = parse_cli_args()
     if args.debug or (args.verbosity is not None and args.verbosity >= 3):
         logger.setLevel(logging.DEBUG)
+
+    if args.parallelism < 1:
+        raise ValueError("--parallelism must be >= 1")
 
     output_dir = (
         Path.cwd() / args.output_dir
@@ -405,7 +535,11 @@ def main() -> None:
 
     logger.info("Started...")
     data_dict = get_meteofrance_data_dict(
-        update_pdf=args.update_pdf, itn_only=args.itn, max_pdfs=args.max_pdfs
+        update=args.update,
+        itn_only=args.itn,
+        max_pdfs=args.max_pdfs,
+        keep_pdf=args.save_pdf,
+        parallelism=args.parallelism,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
