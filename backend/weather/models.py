@@ -48,6 +48,8 @@ class StationQualifieeHexagone(models.Model):
     annee_de_fermeture = models.IntegerField(null=True, blank=True)
     first_temperature_date = TimestampAsDateField()
 
+    classe_recente = models.IntegerField()
+
     class Meta:
         managed = False
         db_table = "v_station_qualifiee_hexagone"
