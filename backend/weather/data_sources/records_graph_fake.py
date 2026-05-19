@@ -6,7 +6,12 @@ from weather.data_sources.temperature_records_fake import (
 )
 from weather.data_sources.timescale import _generate_buckets
 from weather.regions import departments_for_region
+from weather.services.records_graph.protocols import (
+    AbsoluteRecordsGraphDataSource,
+    RecordsGraphDataSource,
+)
 from weather.services.records_graph.types import (
+    AbsoluteRecordsGraphResult,
     RecordsGraphBucket,
     RecordsGraphRecord,
     RecordsGraphRequest,
@@ -14,7 +19,7 @@ from weather.services.records_graph.types import (
 )
 
 
-class FakeRecordsGraphDataSource:
+class FakeRecordsGraphDataSource(RecordsGraphDataSource):
     """
     Data source fake pour le graphe de records.
     Agrège les fake records par bucket temporel.
@@ -76,3 +81,16 @@ class FakeRecordsGraphDataSource:
             for e in entries
         ]
         return RecordsGraphResult(buckets=buckets, records=records)
+
+
+class FakeAbsoluteRecordsGraphDataSource(AbsoluteRecordsGraphDataSource):
+    """
+    Stub : retourne le AbsoluteRecordsGraphResult fourni au constructeur,
+    quelle que soit la requête.
+    """
+
+    def __init__(self, result: AbsoluteRecordsGraphResult) -> None:
+        self.result = result
+
+    def fetch_graph(self, request: RecordsGraphRequest) -> AbsoluteRecordsGraphResult:
+        return self.result

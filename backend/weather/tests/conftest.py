@@ -49,21 +49,20 @@ def insert_mv_record(
         cur.execute(
             """
             INSERT INTO public.mv_records_battus
-                (period_type, period_value, record_type,
-                 station_code, station_name, department,
-                 record_value, record_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (period_type,     period_value,     record_type,     station_code,     station_name,     department,     record_value,     record_date)
+            VALUES
+                (%(period_type)s, %(period_value)s, %(record_type)s, %(station_code)s, %(station_name)s, %(department)s, %(record_value)s, %(record_date)s)
             """,
-            [
-                period_type,
-                period_value,
-                record_type,
-                station_code,
-                station_name,
-                department,
-                value,
-                date,
-            ],
+            {
+                "period_type": period_type,
+                "period_value": period_value,
+                "record_type": record_type,
+                "station_code": station_code,
+                "station_name": station_name,
+                "department": department,
+                "record_value": value,
+                "record_date": date,
+            },
         )
 
 
@@ -71,8 +70,11 @@ def set_cutoff(date: dt.date) -> None:
     with connection.cursor() as cur:
         cur.execute("TRUNCATE public.mv_records_battus_meta;")
         cur.execute(
-            "INSERT INTO public.mv_records_battus_meta (cutoff_date) VALUES (%s);",
-            [date],
+            """
+            INSERT INTO public.mv_records_battus_meta (cutoff_date)
+            VALUES (%(cutoff_date)s);
+            """,
+            {"cutoff_date": date},
         )
 
 
@@ -119,56 +121,93 @@ def setup_db_schema_and_views(django_db_setup, django_db_blocker):
     ref_department_region_sql = (
         BASE_DIR / "sql" / "tables" / "001_table_ref_department_region.sql"
     ).read_text()
-    v_station_sql = (BASE_DIR / "sql" / "views" / "001_v_station.sql").read_text()
-    mv_quot_sql = (
-        BASE_DIR / "sql" / "materialized_views" / "001_mv_quotidienne_realtime.sql"
+    v_station_qualifiee_hexagone_sql = (
+        BASE_DIR / "sql" / "views" / "200_001_v_station_qualifiee_hexagone.sql"
     ).read_text()
-    v_quot_sql = (BASE_DIR / "sql" / "views" / "002_v_quotidienne.sql").read_text()
-    v_station_classe_4 = (
-        BASE_DIR / "sql" / "views" / "003_v_station_classe_4.sql"
+    v_quotidienne_realtime_sql = (
+        BASE_DIR / "sql" / "materialized_views" / "300_001_v_quotidienne_realtime.sql"
     ).read_text()
-    v_station_classe_3_sql = (
-        BASE_DIR / "sql" / "views" / "004_v_station_classe_3.sql"
+    mv_quotidienne_realtime_sql = (
+        BASE_DIR / "sql" / "materialized_views" / "301_001_mv_quotidienne_realtime.sql"
+    ).read_text()
+    v_quotidienne = (
+        BASE_DIR / "sql" / "views" / "310_002_v_quotidienne.sql"
+    ).read_text()
+    v_station_classe_1234 = (
+        BASE_DIR / "sql" / "views" / "210_003_v_station_classe_1234.sql"
+    ).read_text()
+    v_station_classe_123_sql = (
+        BASE_DIR / "sql" / "views" / "220_004_v_station_classe_123.sql"
     ).read_text()
     v_station_deviation_sql = (
-        BASE_DIR / "sql" / "views" / "005_v_station_deviation.sql"
+        BASE_DIR / "sql" / "views" / "500_005_v_station_deviation.sql"
     ).read_text()
     v_station_records_sql = (
-        BASE_DIR / "sql" / "views" / "006_v_station_records.sql"
+        BASE_DIR / "sql" / "views" / "400_006_v_station_records.sql"
+    ).read_text()
+    v_quotidienne_deviation = (
+        BASE_DIR / "sql" / "views" / "510_008_v_quotidienne_deviation.sql"
     ).read_text()
     baseline_station_table_sql = (
-        BASE_DIR / "sql" / "test_tables" / "baseline_station_daily_mean_9120.sql"
+        BASE_DIR
+        / "sql"
+        / "test_tables"
+        / "520_mv_baseline_station_daily_mean_1991_2020.sql"
     ).read_text()
     itn_baseline_tables_sql = (
-        BASE_DIR / "sql" / "test_tables" / "itn_baseline.sql"
+        BASE_DIR
+        / "sql"
+        / "test_tables"
+        / "640_004_v_itn_baseline_monthly_1991_2020.sql"
     ).read_text()
     v_itn_daily_all_years_with_feb29_sql = (
         BASE_DIR
         / "sql"
         / "materialized_views"
         / "itn"
-        / "007_v_itn_daily_all_years_with_feb29.sql"
+        / "720_007_v_itn_daily_all_years_with_feb29.sql"
     ).read_text()
     v_itn_absolute_extremes_daily_sql = (
         BASE_DIR
         / "sql"
         / "materialized_views"
         / "itn"
-        / "008_v_itn_absolute_extremes_daily.sql"
+        / "730_008_v_itn_absolute_extremes_daily.sql"
     ).read_text()
     v_itn_absolute_extremes_monthly_sql = (
         BASE_DIR
         / "sql"
         / "materialized_views"
         / "itn"
-        / "009_v_itn_absolute_extremes_monthly.sql"
+        / "740_009_v_itn_absolute_extremes_monthly.sql"
     ).read_text()
     v_itn_absolute_extremes_yearly_sql = (
         BASE_DIR
         / "sql"
         / "materialized_views"
         / "itn"
-        / "010_v_itn_absolute_extremes_yearly.sql"
+        / "750_010_v_itn_absolute_extremes_yearly.sql"
+    ).read_text()
+    v_records_absolus_par_saison_sql = (
+        BASE_DIR
+        / "sql"
+        / "materialized_views"
+        / "records"
+        / "430_004_v_records_absolus_par_saison.sql"
+    ).read_text()
+    v_records_absolus_sql = (
+        BASE_DIR
+        / "sql"
+        / "materialized_views"
+        / "records"
+        / "440_005_v_records_absolus.sql"
+    ).read_text()
+    v_records_absolus_par_type_sql = (
+        BASE_DIR
+        / "sql"
+        / "materialized_views"
+        / "records"
+        / "450_006_v_records_absolus_par_type.sql"
     ).read_text()
 
     with django_db_blocker.unblock():
@@ -179,10 +218,12 @@ def setup_db_schema_and_views(django_db_setup, django_db_blocker):
             cur.execute(
                 get_drop_mv_or_table_sql(mv_or_table_name="mv_first_temperature_date")
             )
-            cur.execute("DROP VIEW IF EXISTS public.v_quotidienne_itn CASCADE;")
-            cur.execute("DROP VIEW IF EXISTS public.v_station CASCADE;")
+            cur.execute("DROP VIEW IF EXISTS public.v_quotidienne CASCADE;")
             cur.execute(
-                "DROP TABLE IF EXISTS public.baseline_station_daily_mean_1991_2020 CASCADE;"
+                "DROP VIEW IF EXISTS public.v_station_qualifiee_hexagone CASCADE;"
+            )
+            cur.execute(
+                "DROP TABLE IF EXISTS public.mv_baseline_station_daily_mean_1991_2020 CASCADE;"
             )
             cur.execute(schema_sql)
             cur.execute(ref_department_region_sql)
@@ -193,13 +234,15 @@ def setup_db_schema_and_views(django_db_setup, django_db_blocker):
                     CONSTRAINT "mv_first_temperature_date_pkey" PRIMARY KEY ("station_code")
                 );
             """)
-            cur.execute(v_station_sql)
-            cur.execute(mv_quot_sql)
-            cur.execute(v_quot_sql)
-            cur.execute(v_station_classe_4)
-            cur.execute(v_station_classe_3_sql)
+            cur.execute(v_station_qualifiee_hexagone_sql)
+            cur.execute(v_quotidienne_realtime_sql)
+            cur.execute(mv_quotidienne_realtime_sql)
+            cur.execute(v_quotidienne)
+            cur.execute(v_station_classe_1234)
+            cur.execute(v_station_classe_123_sql)
             cur.execute(v_station_deviation_sql)
             cur.execute(v_station_records_sql)
+            cur.execute(v_quotidienne_deviation)
             cur.execute(baseline_station_table_sql)
             cur.execute(itn_baseline_tables_sql)
             cur.execute(
@@ -235,3 +278,17 @@ def setup_db_schema_and_views(django_db_setup, django_db_blocker):
                     record_date   timestamp
                 );
             """)
+            cur.execute("""
+                CREATE TABLE public.mv_records_absolus_par_mois (
+                    station_code  char(8),
+                    month         integer,
+                    txx_max       double precision,
+                    txx_max_date  timestamp,
+                    tnn_min       double precision,
+                    tnn_min_date  timestamp,
+                    CONSTRAINT "mv_records_absolus_par_mois_pkey" PRIMARY KEY (station_code, month)
+                );
+            """)
+            cur.execute(v_records_absolus_par_saison_sql)
+            cur.execute(v_records_absolus_sql)
+            cur.execute(v_records_absolus_par_type_sql)
