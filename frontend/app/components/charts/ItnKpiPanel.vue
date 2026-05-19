@@ -6,7 +6,7 @@
             :loading="pending"
         >
             <template #kpi>
-                <p class="font-semibold text-4xl mb-1 text-red-400">
+                <p class="font-semibold text-4xl mb-1" :class="itnColorClass">
                     <span v-if="kpi != null"
                         >{{ kpi.itn_mean?.toFixed(1) }} °C</span
                     >
@@ -142,18 +142,26 @@ import { dateToStringYMD } from "#imports";
 import type { NationalIndicatorKpiParams } from "~/types/api";
 
 const store = useItnStore();
-const { pickedDateStart, pickedDateEnd } = storeToRefs(store);
+const { effectiveDateStart, effectiveDateEnd } = storeToRefs(store);
 
 const fmt = (d: Date) => d.toLocaleDateString("fr-FR", { dateStyle: "short" });
-const formattedStart = computed(() => fmt(pickedDateStart.value));
-const formattedEnd = computed(() => fmt(pickedDateEnd.value));
+const formattedStart = computed(() => fmt(effectiveDateStart.value));
+const formattedEnd = computed(() => fmt(effectiveDateEnd.value));
 
 const params = computed<NationalIndicatorKpiParams>(() => ({
-    date_start: dateToStringYMD(pickedDateStart.value),
-    date_end: dateToStringYMD(pickedDateEnd.value),
+    date_start: dateToStringYMD(effectiveDateStart.value),
+    date_end: dateToStringYMD(effectiveDateEnd.value),
 }));
 
 const { data: kpi, pending } = useNationalIndicatorKpi(params);
+
+const itnColorClass = computed(() => {
+    const deviation = kpi.value?.deviation_from_normal;
+    if (deviation == null) return "text-green-400";
+    if (deviation > 0) return "text-red-400";
+    if (deviation < 0) return "text-blue-400";
+    return "text-green-400";
+});
 
 const hotDiff = computed(() => {
     if (kpi.value == null) return null;
