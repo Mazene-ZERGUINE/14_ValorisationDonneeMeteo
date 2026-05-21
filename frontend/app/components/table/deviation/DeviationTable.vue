@@ -16,6 +16,7 @@ import { useDeviationTableStore } from "~/stores/deviationTableStore";
 import DayPicker from "~/components/ui/commons/selectBar/dayPicker.vue";
 import { useCustomDate } from "~/composables/useCustomDate";
 import type { TemperatureDeviationResponse } from "~/types/api";
+import TableEmptyState from "~/components/table/TableEmptyState.vue";
 
 const props = withDefaults(defineProps<{ showFilters?: boolean }>(), {
     showFilters: true,
