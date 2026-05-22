@@ -173,12 +173,16 @@ pre-commit install
 Le projet utilise deux configurations de pre-commit :
 
 1. **Configuration racine** (`.pre-commit-config.yaml`) :
-   - Exécute les hooks backend et frontend
-   - Vérifie les conflits de merge, les fins de ligne, etc.
+
+- Exécute les hooks backend et frontend
+- Vérifie les conflits de merge, les fins de ligne, etc.
 
 2. **Configuration backend** (`backend/.pre-commit-config.yaml`) :
-   - Utilise Ruff pour le linting et le formatting Python
-   - Ignore le code DJ001 (docstring pour les classes privées)
+
+- Utilise Ruff pour le linting et le formatting Python
+- Lance les tests unitaires backend avec `uv run pytest weather/tests/unit`
+- Lance les tests d'intégration backend avec `uv run pytest weather/tests/integration`
+- Centralise l'ignore de `DJ001` dans `backend/pyproject.toml`
 
 ### Exécution manuelle
 
@@ -192,6 +196,24 @@ Pour exécuter uniquement les hooks backend :
 
 ```bash
 cd backend && uv run pre-commit run --all-files --config=.pre-commit-config.yaml
+```
+
+Pour exécuter uniquement tous les tests backend :
+
+```bash
+cd backend && uv run pytest
+```
+
+Pour exécuter uniquement les tests unitaires backend :
+
+```bash
+cd backend && uv run pytest weather/tests/unit
+```
+
+Pour exécuter uniquement les tests d'intégration backend :
+
+```bash
+cd backend && uv run pytest weather/tests/integration
 ```
 
 Pour exécuter uniquement les hooks frontend :
@@ -214,6 +236,6 @@ npm ci
 
 ### Outils utilisés
 
-- **Backend** : Ruff (linting + formatting)
+- **Backend** : Ruff (linting + formatting) + pytest sur `weather/tests/unit`
 - **Frontend** : ESLint + Prettier
 - **Commun** : vérification des conflits, fins de ligne, etc.
