@@ -3,7 +3,7 @@ repos:
     rev: "v0.5.0"
     hooks:
       - id: ruff
-        args: [ --fix, --ignore=DJ001 ]
+        args: [ --fix ]
         files: \.py$
       - id: ruff-format
         files: \.py$
@@ -22,3 +22,11 @@ repos:
     rev: 0.8.1
     hooks:
       - id: nbstripout
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: Run backend unit tests
+        entry: bash -c 'cd backend && uv run pytest weather/tests/unit'
+        language: system
+        pass_filenames: false
+        always_run: true

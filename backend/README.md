@@ -244,9 +244,18 @@ cd backend
 uv run pre-commit run --all-files --config=.pre-commit-config.yaml
 ```
 
+Les hooks backend exécutent Ruff et les tests unitaires backend (`uv run pytest weather/tests/unit`).
+
 ### Tests
 
 ```bash
+# Tests unitaires
+uv run pytest weather/tests/unit
+
+# Tests d'intégration
+uv run pytest weather/tests/integration
+
+# Tous les tests
 uv run pytest
 ```
 

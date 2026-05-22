@@ -55,7 +55,10 @@ select = [
     "DJ",     # flake8-django
     "N", # pep8-naming
 ]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    "DJ001",
+]
 
 [tool.ruff.lint.pep8-naming]
 ignore-names = ["_", "i", "j", "k"]
