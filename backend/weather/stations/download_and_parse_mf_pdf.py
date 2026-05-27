@@ -7,7 +7,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
 import pdfplumber
 import requests
@@ -443,27 +443,6 @@ def save_csv(rows: list[list[str | None]], csv_file_path: Path) -> None:
             writer.writerow(row)
 
 
-def dict_to_csv(data_dict: dict[StationCode, StationInfo], csv_file_path: Path) -> None:
-    rows = prepare_csv_rows(data_dict)
-    save_csv(rows, csv_file_path)
-
-
-def dict_to_classes_csv(
-    data_dict: dict[StationCode, StationInfo],
-    csv_file_path: Path,
-) -> None:
-    rows = prepare_classes_csv_rows(data_dict)
-    save_csv(rows, csv_file_path)
-
-
-def dict_to_lifecycle_csv(
-    data_dict: dict[StationCode, StationInfo],
-    csv_file_path: Path,
-) -> None:
-    rows = prepare_lifecycle_csv_rows(data_dict)
-    save_csv(rows, csv_file_path)
-
-
 def serialize_data_dict(data_dict: dict[StationCode, StationInfo]) -> dict:
     return {
         station_id: {
@@ -484,11 +463,54 @@ def save_json(data: dict, json_file_path: Path) -> None:
         json.dump(data, file, indent=4, ensure_ascii=False)
 
 
-def dict_to_json(
-    data_dict: dict[StationCode, StationInfo], json_file_path: Path
+class OutputWriter(Protocol):
+    """Destination-agnostic sink for the generated JSON and CSV outputs."""
+
+    def write_json(self, filename: str, data: dict) -> None: ...
+
+    def write_csv(self, filename: str, rows: list[list[str | None]]) -> None: ...
+
+
+class FileOutputWriter:
+    """Writes each output to a file inside ``output_dir``."""
+
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_json(self, filename: str, data: dict) -> None:
+        save_json(data, self.output_dir / filename)
+
+    def write_csv(self, filename: str, rows: list[list[str | None]]) -> None:
+        save_csv(rows, self.output_dir / filename)
+
+
+class StdoutOutputWriter:
+    """Prints each output to stdout instead of writing files (dry run)."""
+
+    def write_json(self, filename: str, data: dict) -> None:
+        self._print_header(filename)
+        json.dump(data, sys.stdout, indent=4, ensure_ascii=False)
+        print()
+
+    def write_csv(self, filename: str, rows: list[list[str | None]]) -> None:
+        self._print_header(filename)
+        writer = csv.writer(sys.stdout, lineterminator="\n")
+        writer.writerows(rows)
+
+    @staticmethod
+    def _print_header(filename: str) -> None:
+        print(f"\n===== {filename} =====")
+
+
+def write_outputs(
+    data_dict: dict[StationCode, StationInfo],
+    writer: OutputWriter,
 ) -> None:
-    serializable_data = serialize_data_dict(data_dict)
-    save_json(serializable_data, json_file_path)
+    writer.write_json("stations_data.json", serialize_data_dict(data_dict))
+    writer.write_csv("stations_data.csv", prepare_csv_rows(data_dict))
+    writer.write_csv("stations_classes.csv", prepare_classes_csv_rows(data_dict))
+    writer.write_csv("stations_lifecycle.csv", prepare_lifecycle_csv_rows(data_dict))
 
 
 def parse_cli_args() -> argparse.Namespace:
@@ -542,6 +564,12 @@ def parse_cli_args() -> argparse.Namespace:
         help="Output directory (relative to cwd). Default: output/ next to this script.",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print outputs to stdout instead of writing files (default: False).",
+    )
+    parser.add_argument(
         "--parallelism",
         type=int,
         default=1,
@@ -573,13 +601,15 @@ def main() -> None:
         parallelism=args.parallelism,
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    dict_to_json(data_dict, output_dir / "stations_data.json")
-    dict_to_csv(data_dict, output_dir / "stations_data.csv")
-    dict_to_classes_csv(data_dict, output_dir / "stations_classes.csv")
-    dict_to_lifecycle_csv(data_dict, output_dir / "stations_lifecycle.csv")
+    writer: OutputWriter = (
+        StdoutOutputWriter() if args.dry_run else FileOutputWriter(output_dir)
+    )
+    write_outputs(data_dict, writer)
 
-    logger.info("Data saved to %s", output_dir)
+    if args.dry_run:
+        logger.info("Dry run complete; no files written.")
+    else:
+        logger.info("Data saved to %s", output_dir)
 
 
 if __name__ == "__main__":
