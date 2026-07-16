@@ -1197,8 +1197,8 @@ class MaterializedTemperatureRecordsDataSource:
         terr_clause, terr_params = _territoire_clause_named(
             request.territoire,
             request.territoire_id,
-            dept_col="department",
-            station_col="station_code",
+            dept_col="m.department",
+            station_col="m.station_code",
         )
         if terr_clause:
             clauses.append(terr_clause)
