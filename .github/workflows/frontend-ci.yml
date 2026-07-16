@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install npm dependencies
@@ -39,16 +40,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm clean-install
+
       - name: Start back-end stack
-        run: docker-compose -f docker-compose.dev.yml up --build
+        run: docker compose -f docker-compose.dev.yml up -d --build
 
-      - name: : Wait for back-end stack to be ready
-        run: bash -c \
-                    'until curl -sf http://localhost:8000/api/health/; do sleep 2; done'
+      - name: Wait for back-end stack to be ready
+        run: |
+          timeout 120 bash -c 'until curl -sf http://localhost:8000/api/health/; do sleep 2; done'
 
-
-      - name: run Tests
+      - name: Run tests
         run: npm run test
+
+      - name: Dump back-end logs
+        if: failure()
+        run: docker compose -f docker-compose.dev.yml logs
+
+      - name: Stop back-end stack
+        if: always()
+        run: docker compose -f docker-compose.dev.yml down -v
 
   build-and-push-docker-image:
     runs-on: ubuntu-latest
