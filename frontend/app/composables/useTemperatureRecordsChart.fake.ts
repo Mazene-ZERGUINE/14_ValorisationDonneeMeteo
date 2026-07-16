@@ -2205,5 +2205,5 @@ export function useTemperatureRecordsChartFake(
         };
     });
 
-    return { data, pending: ref(false), error: ref(null) };
+    return {data, pending: ref(false), error: ref(null)};
 }
