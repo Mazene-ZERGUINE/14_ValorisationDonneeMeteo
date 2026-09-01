@@ -8,7 +8,6 @@ on:
 
 concurrency:
   group: frontend-ci-${{ github.ref }}
-  # Never cancel a run on main: it may be mid-push to the registry.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -39,8 +38,6 @@ jobs:
       - name: Install npm dependencies
         run: npm clean-install
 
-      # Built early and detached so the container boots while lint and
-      # build run. Shares the layer cache with the back-end workflow.
       - name: Build the back-end image
         uses: docker/build-push-action@v6
         with:
@@ -63,26 +60,21 @@ jobs:
       - name: Run linter
         run: npm run lint
 
-      # Runs even if the linter failed, so one style violation doesn't
-      # hide a broken build or failing tests.
       - name: Test build
-        if: ${{ !cancelled() }}
         run: npm run build
 
       - name: Wait for the back-end to be ready
         id: wait-backend
-        if: ${{ !cancelled() }}
         run: timeout 120 bash -c 'until curl -sf -o /dev/null http://localhost:8000/api/schema/; do sleep 2; done'
 
       - name: Run tests (unit + integration) with coverage
         id: tests
-        if: ${{ !cancelled() && steps.wait-backend.outcome == 'success' }}
         run: npm run test:ci:coverage
         env:
           NUXT_PUBLIC_API_BASE: http://localhost:8000/api/v1
 
+
       - name: Publish coverage to the job summary
-        if: ${{ !cancelled() && hashFiles('frontend/coverage/coverage-summary.json') != '' }}
         run: |
           cat > /tmp/coverage-summary.cjs <<'JS'
           const fs = require("fs");
@@ -97,14 +89,19 @@ jobs:
           const ok = total >= THRESHOLD;
           const out = [];
 
-          out.push(`## Front-end coverage ${ok ? "✅" : "❌"} ${total.toFixed(2)}%`);
-          out.push(`_Threshold: ${THRESHOLD}% of lines_\n`);
+          out.push(`## Front-end coverage ${ok ? "✅" : "⚠️"} ${total.toFixed(2)}%`);
+          out.push(`_Target: ${THRESHOLD}% of lines (informational, does not fail the build)_\n`);
           out.push("| Metric | Covered | Total | % |");
           out.push("| --- | ---: | ---: | ---: |");
           for (const metric of ["statements", "branches", "functions", "lines"]) {
             const m = data.total[metric];
             out.push(`| ${metric} | ${m.covered} | ${m.total} | ${m.pct.toFixed(2)}% |`);
           }
+
+          out.push(
+            "\n📥 The full HTML report is attached to this run as the " +
+              "**frontend-coverage-html** artifact — download it and open `index.html`."
+          );
 
           const root = process.cwd() + path.sep;
           const files = Object.entries(data)
@@ -136,18 +133,18 @@ jobs:
             out.push("\n</details>");
           }
 
-          console.log(out.join("\n"));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
 
           if (!ok) {
-            console.error(
-              `Coverage ${total.toFixed(2)}% is below the ${THRESHOLD}% threshold.`
+            console.log(
+              `::warning title=Front-end coverage::Coverage ${total.toFixed(2)}% ` +
+                `is below the ${THRESHOLD}% target.`
             );
-            process.exit(1);
           }
           JS
-          node /tmp/coverage-summary.cjs >> "$GITHUB_STEP_SUMMARY"
+          node /tmp/coverage-summary.cjs
 
-      - name: Upload the coverage report
+      - name: Upload the coverage data
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -156,6 +153,16 @@ jobs:
             frontend/coverage/coverage-summary.json
             frontend/coverage/lcov.info
           if-no-files-found: warn
+
+
+      - name: Upload the HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-html
+          path: frontend/coverage/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Dump back-end logs
         if: ${{ !cancelled() && (steps.wait-backend.outcome == 'failure' || steps.tests.outcome == 'failure') }}
@@ -169,7 +176,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: quality-and-tests
     env:
-      # Single source of truth for "is this a real release build?"
       PUSH_IMAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4

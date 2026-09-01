@@ -10,7 +10,9 @@ export default defineConfig({
             provider: "v8",
             all: true,
             reportsDirectory: "coverage",
-            reporter: ["text-summary", "json-summary", "lcov"],
+            // "lcovonly" rather than "lcov": the latter also emits its own
+            // HTML tree, which would duplicate the "html" report.
+            reporter: ["text-summary", "json-summary", "lcovonly", "html"],
             include: ["app/**/*.{ts,vue}"],
             exclude: [
                 "app/**/*.test.ts",
