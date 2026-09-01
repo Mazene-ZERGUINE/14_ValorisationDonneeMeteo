@@ -8,6 +8,9 @@ RUN npm install
 
 COPY . .
 
+# nuxt build dépasse le heap V8 par défaut sur une machine à 8 Go.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 RUN npm run build
 
 FROM node:24-alpine AS prod
