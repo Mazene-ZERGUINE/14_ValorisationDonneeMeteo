@@ -1,7 +1,7 @@
 """
 Helpers d'insertion pour les tables source horaires :
-- `Horaire` : table consolidée (4 jours à 36 h dans le passé)
-- `HoraireTempsReel` : flux horaire temps réel (3 h à 36 h dans le passé)
+- `Horaire` : table consolidée (4 jours à 3 jours dans le passé)
+- `HoraireTempsReel` : flux horaire temps réel (3 h à 3 jours dans le passé)
 - `InfrahoraireTempsReel` : flux infra-horaire temps réel (3 dernières heures)
 - `mv_quotidienne_realtime` : la "MV" remplacée par table en test (voir conftest)
 """
