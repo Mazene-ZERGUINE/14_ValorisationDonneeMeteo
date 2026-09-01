@@ -19,7 +19,8 @@
         "test:integration": "vitest run --project integration --no-file-parallelism",
         "test:all": "vitest run --no-file-parallelism",
         "test:ci": "vitest run --no-file-parallelism",
-        "coverage": "vitest run --coverage",
+        "test:ci:coverage": "vitest run --no-file-parallelism --coverage",
+        "coverage": "vitest run --no-file-parallelism --coverage",
         "typecheck": "vue-tsc --noEmit -p .nuxt/tsconfig.json",
         "check": "npm run lint:fix && npm run format && npm run lint && npm run test:unit"
     },
@@ -51,6 +52,7 @@
         "@nuxt/test-utils": "^3.23.0",
         "@primevue/nuxt-module": "^4.5.4",
         "@types/topojson-client": "^3.1.5",
+        "@vitest/coverage-v8": "^3.2.7",
         "@vue/test-utils": "^2.4.6",
         "eslint": "^9.39.2",
         "eslint-config-prettier": "^10.1.8",

@@ -30,3 +30,11 @@ Thumbs.db
 # backend data
 backend/db_data/quotidienne_2024_2025.csv
 backend/db_data/station.sql
+
+# Test coverage reports
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
+frontend/coverage/

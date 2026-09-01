@@ -6,6 +6,19 @@ export default defineConfig({
     test: {
         globals: true,
         environment: "node",
+        coverage: {
+            provider: "v8",
+            all: true,
+            reportsDirectory: "coverage",
+            reporter: ["text-summary", "json-summary", "lcov"],
+            include: ["app/**/*.{ts,vue}"],
+            exclude: [
+                "app/**/*.test.ts",
+                "app/**/*.d.ts",
+                "app/**/types/**",
+                "app/app.config.ts",
+            ],
+        },
         environmentOptions: {
             nuxt: {
                 dotenv: {

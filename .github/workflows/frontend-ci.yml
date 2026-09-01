@@ -8,7 +8,8 @@ on:
 
 concurrency:
   group: frontend-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on main: it may be mid-push to the registry.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -18,11 +19,14 @@ env:
   IMAGE_NAME: 14_valorisationdonneemeteo-frontend
 
 jobs:
-  build:
+  quality-and-tests:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./frontend
+    env:
+      COVERAGE_THRESHOLD: "25"
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,39 +34,23 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: docker/setup-buildx-action@v3
 
       - name: Install npm dependencies
         run: npm clean-install
 
-      - name: Run linter
-        run: npm run lint
-
-      - name: Test build
-        run: npm run build
-
-  run-tests:
-    runs-on: ubuntu-latest
-    needs: build
-    defaults:
-      run:
-        working-directory: ./frontend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install npm dependencies
-        run: npm clean-install
-
+      # Built early and detached so the container boots while lint and
+      # build run. Shares the layer cache with the back-end workflow.
       - name: Build the back-end image
-        working-directory: .
-        run: docker build -t meteo-backend:ci ./backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          tags: meteo-backend:ci
+          load: true
+          cache-from: type=gha,scope=backend-image
+          cache-to: type=gha,mode=max,scope=backend-image
 
       - name: Start the back-end
-        working-directory: .
         run: |
           docker run -d --name meteo-backend -p 8000:8000 \
             -e SECRET_KEY=django-insecure-ci-secret \
@@ -72,31 +60,123 @@ jobs:
             -e CORS_ALLOWED_ORIGINS=http://localhost:3000 \
             meteo-backend:ci
 
+      - name: Run linter
+        run: npm run lint
+
+      # Runs even if the linter failed, so one style violation doesn't
+      # hide a broken build or failing tests.
+      - name: Test build
+        if: ${{ !cancelled() }}
+        run: npm run build
+
       - name: Wait for the back-end to be ready
+        id: wait-backend
+        if: ${{ !cancelled() }}
         run: timeout 120 bash -c 'until curl -sf -o /dev/null http://localhost:8000/api/schema/; do sleep 2; done'
 
-      - name: Run tests (unit + integration)
-        run: npm run test:ci
+      - name: Run tests (unit + integration) with coverage
+        id: tests
+        if: ${{ !cancelled() && steps.wait-backend.outcome == 'success' }}
+        run: npm run test:ci:coverage
         env:
           NUXT_PUBLIC_API_BASE: http://localhost:8000/api/v1
 
+      - name: Publish coverage to the job summary
+        if: ${{ !cancelled() && hashFiles('frontend/coverage/coverage-summary.json') != '' }}
+        run: |
+          cat > /tmp/coverage-summary.cjs <<'JS'
+          const fs = require("fs");
+          const path = require("path");
+
+          const THRESHOLD = Number(process.env.COVERAGE_THRESHOLD);
+          const data = JSON.parse(
+            fs.readFileSync("coverage/coverage-summary.json", "utf8")
+          );
+
+          const total = data.total.lines.pct;
+          const ok = total >= THRESHOLD;
+          const out = [];
+
+          out.push(`## Front-end coverage ${ok ? "✅" : "❌"} ${total.toFixed(2)}%`);
+          out.push(`_Threshold: ${THRESHOLD}% of lines_\n`);
+          out.push("| Metric | Covered | Total | % |");
+          out.push("| --- | ---: | ---: | ---: |");
+          for (const metric of ["statements", "branches", "functions", "lines"]) {
+            const m = data.total[metric];
+            out.push(`| ${metric} | ${m.covered} | ${m.total} | ${m.pct.toFixed(2)}% |`);
+          }
+
+          const root = process.cwd() + path.sep;
+          const files = Object.entries(data)
+            .filter(([key]) => key !== "total")
+            .map(([key, value]) => [
+              key.startsWith(root) ? key.slice(root.length) : key,
+              value,
+            ])
+            .filter(([, value]) => value.lines.pct < 100)
+            .sort((a, b) => a[1].lines.pct - b[1].lines.pct);
+
+          if (files.length === 0) {
+            out.push("\nEvery file is fully covered.");
+          } else {
+            out.push("\n<details><summary>Files below 100%</summary>\n");
+            out.push("| File | Stmts | Branch | Funcs | Lines |");
+            out.push("| --- | ---: | ---: | ---: | ---: |");
+            for (const [name, v] of files.slice(0, 30)) {
+              out.push(
+                `| \`${name}\` | ${v.statements.pct.toFixed(0)}% ` +
+                  `| ${v.branches.pct.toFixed(0)}% ` +
+                  `| ${v.functions.pct.toFixed(0)}% ` +
+                  `| ${v.lines.pct.toFixed(2)}% |`
+              );
+            }
+            if (files.length > 30) {
+              out.push(`\n_${files.length - 30} more files omitted._`);
+            }
+            out.push("\n</details>");
+          }
+
+          console.log(out.join("\n"));
+
+          if (!ok) {
+            console.error(
+              `Coverage ${total.toFixed(2)}% is below the ${THRESHOLD}% threshold.`
+            );
+            process.exit(1);
+          }
+          JS
+          node /tmp/coverage-summary.cjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: |
+            frontend/coverage/coverage-summary.json
+            frontend/coverage/lcov.info
+          if-no-files-found: warn
+
       - name: Dump back-end logs
-        if: failure()
+        if: ${{ !cancelled() && (steps.wait-backend.outcome == 'failure' || steps.tests.outcome == 'failure') }}
         run: docker logs meteo-backend
 
       - name: Stop the back-end
         if: always()
         run: docker rm -f meteo-backend
 
-  docker:
+  docker-push:
     runs-on: ubuntu-latest
-    needs: [build, run-tests]
+    needs: quality-and-tests
+    env:
+      # Single source of truth for "is this a real release build?"
+      PUSH_IMAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to the registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: env.PUSH_IMAGE == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -120,7 +200,7 @@ jobs:
         with:
           context: ./frontend
           tags: ${{ steps.tags.outputs.list }}
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          load: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+          push: ${{ env.PUSH_IMAGE == 'true' }}
+          load: ${{ env.PUSH_IMAGE != 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

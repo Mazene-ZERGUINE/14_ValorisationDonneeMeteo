@@ -2,6 +2,32 @@
 
 Projet Data For Good - Saison 14
 
+## CI/CD
+
+[![Back-end CI](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/back-end-ci.yml/badge.svg?branch=main)](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/back-end-ci.yml)
+[![Frontend CI](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/frontend-ci.yml/badge.svg?branch=main)](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/frontend-ci.yml)
+
+### Couverture de tests
+
+Les deux pipelines mesurent la couverture de tests et publient un rapport :
+
+- dans le **résumé du job** GitHub Actions (onglet *Summary* du run) ;
+- dans un **commentaire de la Pull Request**, mis à jour à chaque run (un commentaire par pipeline).
+
+Le rapport est aussi disponible en artefact (`backend-coverage`, `frontend-coverage`).
+Les seuils affichés (70 % back-end, 25 % front-end) sont indicatifs : ils colorent le badge
+du rapport mais ne font pas échouer la CI.
+
+Pour reproduire en local :
+
+```bash
+# back-end
+cd backend && uv run pytest --cov --cov-report=term-missing
+
+# front-end
+cd frontend && npm run coverage
+```
+
 ## Structure du projet
 
 ```
