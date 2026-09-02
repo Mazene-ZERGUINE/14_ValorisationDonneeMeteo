@@ -74,78 +74,13 @@ jobs:
             --cov-report=html:htmlcov
 
       - name: Publish coverage to the job summary
-        run: |
-          uv run python - <<'PY'
-          import contextlib, json, os
-
-          threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          with open("coverage.json") as fh:
-              data = json.load(fh)
-
-          total = data["totals"]["percent_covered"]
-          ok = total >= threshold
-
-          summary = open(os.environ["GITHUB_STEP_SUMMARY"], "a")
-          with summary, contextlib.redirect_stdout(summary):
-              print(f"## Back-end coverage {'✅' if ok else '⚠️'} {total:.2f}%")
-              print(f"_Target: {threshold:.0f}% (informational, does not fail the build)_\n")
-              print(
-                  "📥 The full HTML report is attached to this run as the "
-                  "**backend-coverage-html** artifact — download it and open "
-                  "`index.html`.\n"
-              )
-
-              rows = sorted(
-                  data["files"].items(),
-                  key=lambda kv: kv[1]["summary"]["percent_covered"],
-              )
-              below = [r for r in rows if r[1]["summary"]["percent_covered"] < 100]
-
-              if not below:
-                  print("Every file is fully covered.")
-              else:
-                  print("| File | Statements | Missing | Coverage |")
-                  print("| --- | ---: | ---: | ---: |")
-                  for path, info in below[:30]:
-                      s = info["summary"]
-                      print(
-                          f"| `{path}` | {s['num_statements']} "
-                          f"| {s['missing_lines']} "
-                          f"| {s['percent_covered']:.2f}% |"
-                      )
-                  if len(below) > 30:
-                      print(f"\n_{len(below) - 30} more files omitted._")
-
-          if not ok:
-              print(
-                  f"::warning title=Back-end coverage::Coverage {total:.2f}% "
-                  f"is below the {threshold:.0f}% target."
-              )
-          PY
-
-      - name: Upload the coverage data
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            backend/coverage.json
-            backend/coverage.xml
-          if-no-files-found: warn
-
-
-      - name: Upload the HTML coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage-html
-          path: backend/htmlcov/
-          if-no-files-found: warn
-          retention-days: 14
+        run: uv run python "$GITHUB_WORKSPACE/.github/workflows/scripts/backend-coverage-summary.py"
 
   docker-push:
     runs-on: ubuntu-latest
     needs: quality-and-tests
     env:
-      PUSH_IMAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      PUSH_IMAGE: ${{ github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -157,25 +92,13 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Resolve image tags
-        id: tags
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: |
-          image="${DOCKER_USERNAME:-local}/${IMAGE_NAME}"
-          {
-            echo "list<<EOF"
-            echo "${image}:latest"
-            echo "${image}:${GITHUB_SHA}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Build (and push on main) the Docker image
         uses: docker/build-push-action@v6
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         with:
           context: ./backend
-          tags: ${{ steps.tags.outputs.list }}
+          tags: ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
           push: ${{ env.PUSH_IMAGE == 'true' }}
-          load: ${{ env.PUSH_IMAGE != 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
