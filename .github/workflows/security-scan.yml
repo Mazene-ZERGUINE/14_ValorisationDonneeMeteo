@@ -66,4 +66,6 @@ jobs:
 
       - name: Enforce the gate
         run: |
-          trivy convert --exit-code 1 --severity CRITICAL --ignore-unfixed results.json
+          trivy image --scanners vuln,secret \
+            --exit-code 1 --severity CRITICAL --ignore-unfixed \
+            meteo-${{ matrix.component }}:scan
