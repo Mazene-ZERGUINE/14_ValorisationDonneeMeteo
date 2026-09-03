@@ -1,267 +1,75 @@
 # Valorisation Donnée Météo
 
-Projet Data For Good - Saison 14
-
-## CI/CD
-
 [![Back-end CI](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/back-end-ci.yml/badge.svg?branch=main)](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/back-end-ci.yml)
 [![Frontend CI](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/frontend-ci.yml/badge.svg?branch=main)](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/frontend-ci.yml)
+[![Security Scan](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/security-scan.yml/badge.svg?branch=main)](https://github.com/Mazene-ZERGUINE/14_ValorisationDonneeMeteo/actions/workflows/security-scan.yml)
 
-### Couverture de tests
+## Approche DevOps
 
-Les deux pipelines mesurent la couverture de tests et publient un rapport :
+j'ai aborder ce projet sur 3 partie: 
 
-- dans le **résumé du job** GitHub Actions (onglet *Summary* du run) ;
-- dans un **commentaire de la Pull Request**, mis à jour à chaque run (un commentaire par pipeline).
+1. **[Pipelines CI/CD](#1-pipelines-cicd)**: trois workflows GitHub Actions indépendants : CI front-end, CI back-end et scan de sécurité Trivy.
+2. **Métriques Prometheus & Grafana**
+3. **Docker hardening** 
 
-Le rapport est aussi disponible en artefact (`backend-coverage`, `frontend-coverage`).
-Les seuils affichés (70 % back-end, 25 % front-end) sont indicatifs : ils colorent le badge
-du rapport mais ne font pas échouer la CI.
 
-Pour reproduire en local :
 
-```bash
-# back-end
-cd backend && uv run pytest --cov --cov-report=term-missing
+## 1. Pipelines CI/CD
 
-# front-end
-cd frontend && npm run coverage
-```
+**3 workflows GitHub Actions** indépendants, déclenchés sur `push` / `pull_request` (`main`, `develop`) :
 
-## Structure du projet
+| Workflow | Rôle | Déclencheurs additionnels |
+| --- | --- | --- |
+|  [Frontend CI](.github/workflows/frontend-ci.yml) | Lint → build → tests vs vrai back-end → push image | — |
+| ️[Back-end CI](.github/workflows/back-end-ci.yml) | Lint → tests vs vraie TimescaleDB → push image | — |
+|  [Security Scan](.github/workflows/security-scan.yml) | Build → scan Trivy (CVE + secrets) | cron lundi 4h UTC, manuel |
 
-```
-├── backend/    # API et traitement des données (Python)
-├── frontend/   # Interface utilisateur
-```
 
-## Pour commencer
+![Diagramme des workflows](docs/screenshots/ci-cd-diagram.png)
 
-Consultez les README de chaque sous-projet :
+### 1.1 Étapes clés par workflow
 
-- [Backend](backend/README.md)
-- [Frontend](frontend/README.md)
+| # | Frontend CI | Back-end CI | Security Scan | Bloquant ? |
+| --- | --- | --- | --- | --- |
+| 1 | Build & run image back-end (Docker) | Service `timescaledb` (health check) | Build image (`frontend` / `backend`, matrice) | ✅ |
+| 2 | `npm run lint` | `ruff check --output-format=github` | Installation Trivy (v0.74.0) | ✅ |
+| 3 | `npm run build` | `uv sync --locked` | `trivy image --scanners vuln,secret` → `results.json` | ✅ |
+| 4 | Attente API back-end (`timeout 120s`) | `pytest --cov` (unit + intégration) | Publication du rapport complet (`trivy convert`) | ✅ (4) / — (5) |
+| 5 | `npm run test:ci:coverage` (vs API réelle) | Résumé couverture → job summary | **Gate** : `--exit-code 1 --severity CRITICAL --ignore-unfixed` | ✅ |
+| 6 | Résumé couverture → job summary | — | — | ⚠️ info only |
+| 7 | Push image sur `main` uniquement | Push image sur `main` uniquement | — | conditionnel |
 
-## Contribuer
 
-Ce projet fait partie de la saison 14 de Data For Good.
+### 1.2 Résultats
 
-## Utilisation de Git
+| Statut | Frontend CI / Back-end CI | Security Scan |
+| --- | --- | --- |
+| ✅ **Succès** | Badge vert · image poussée sur `main` · résumé de couverture publié | Badge vert · rapport complet publié (même si `HIGH`/`MEDIUM` présents) |
+| ⚠️ **Avertissement** | Couverture < seuil → job **réussi** quand même + `::warning` dans le résumé | CVE sans correctif ou non-`CRITICAL` → listée mais non bloquante |
+| ❌ **Échec** | Lint/build/test KO → job stoppé, `docker-push` **ne démarre pas** (`needs`), aucune image poussée | CVE `CRITICAL` corrigible détectée → job échoue (`exit-code 1`), CVE listée dans le résumé |
 
-Le projet utilise la branche `main` comme branche principale.
 
-## Workflow de contribution
+---
 
-Lire attentivement nos bonnes pratiques de développement : [Branches et commits : Workflow de contribution](https://outline.services.dataforgood.fr/doc/onboarding-dev-OFGKWOcxOn)
+## 2. Métriques Prometheus & Grafana
 
-Extraits :
+**But** : observer la santé du back-end en continu pour détecter une régression de performance avant qu'elle n'impacte les utilisateurs.
 
-### :tanabata_tree:Branches et commits : Workflow de contribution
 
-Pour que tout le monde adopte les mêmes pratiques, nous avons posé des principes relatifs aux branches et aux commits. A lire impérativement avant de commencer.
+### 2.1 Étapes de mise en place
 
-#### 0. **Paramétrer git**
+| # | Étape | Détail |
+| --- | --- | --- |
+| 1 | Dépendance | `uv add django-prometheus`, ajoutée dans [`backend/pyproject.toml`](backend/pyproject.toml) |
+| 2 | Exposition de l'endpoint | Middlewares `PrometheusBeforeMiddleware` / `PrometheusAfterMiddleware` encadrant la stack Django ([`settings.py`](backend/config/settings.py)) + `path("", include("django_prometheus.urls"))` ([`urls.py`](backend/config/urls.py)) → expose `GET /metrics` |
+| 3 | Image Prometheus | `prom/prometheus:v3.1.0` ajoutée au [`docker-compose.dev.yml`](docker-compose.dev.yml), config montée en lecture seule depuis [`prometheus.yml`](prometheus.yml) |
+| 4 | Configuration du scrape | Job `backend` ciblant `backend:8000` (nom du service Docker sur le réseau `app_net`) toutes les 15s ([`prometheus.yml`](prometheus.yml)) |
+| 5 | Image Grafana | `grafana/grafana:11.4.0` ajoutée au compose, dépend de `prometheus`, volume `grafana-data` persistant |
+| 6 | Attachement Grafana ↔ Prometheus | Datasource provisionnée automatiquement au démarrage via [`grafana/provisioning/datasources/prometheus.yml`](grafana/provisioning/datasources/prometheus.yml) → `http://prometheus:9090`, marquée `isDefault` (aucune config manuelle requise) |
+| 7 | Premier dashboard | Créé dans Grafana avec les requêtes PromQL ci-dessous |
 
-```bash
-git config --local pull.rebase merges
-git config --local rebase.autostash true
-```
 
-- `pull.rebase merges` applique vos commits locaux par-dessus le remote.
-- `rebase.autostash true` permet de stasher automatiquement vos changements locaux non commités avant de faire un pull/rebase, et de les réappliquer après. Cela évite les conflits liés à des changements locaux non commités lors du pull/rebase.
+## 3. Docker hardening
 
-#### 1. **Créer une branche depuis** `**main**`
-
-```bash
-git checkout main
-git pull origin main
-git checkout -b <type>/(<scope>/)?<description-courte>
-```
-
-Convention de nommage des branches :
-
-* `feat/scope/nom-feature` : nouvelle fonctionnalité
-* `fix/scope/nom-bug` : correction de bug
-* `docs/sujet` : documentation
-* `refactor/sujet` : refactoring de code
-* `chore/sujet` : tâche de maintenance
-
-Exemple : `feat/itn/ajout-carte-meteo` ou `fix/ecarts-normales/erreur-chargement-donnees`
-
-#### 2. **Faire des commits atomiques**
-
-Un commit atomique = une seule modification logique. Cela permet de :
-
-* Faciliter la relecture du code
-* Simplifier un éventuel rollback
-* Garder un historique clair
-
-```bash
-git add <fichiers-concernés>
-git commit -m "<type>: (<scope>:)? <description>"
-```
-
-Format des messages de commit :
-
-* `feat: itn: ajoute le composant carte météo`
-* `fix: ecarts normales: corrige l'affichage des températures négatives`
-* `docs: readme: mise à jour installation`
-* `refactor: parser: simplifie la logique de parsing`
-* `test: parser: ajoute les tests unitaires`
-* `chore: npm: met à jour les dépendances`
-
-Vous n'êtes pas obligé d'utiliser le terminal, vous pouvez utiliser n'importe quelle interface graphique, notamment celle de VSCode et JetBrains.
-
-#### 3. **Pousser sa branche et créer une Pull Request (PR)**
-
-```bash
-git push origin <nom-de-ta-branche>
-```
-
-Puis sur GitHub, créer une PR vers `main` en :
-
-* Donnant un titre clair et descriptif
-* Remplissant le template de PR
-* Assignant des reviewers
-
-#### 4. **Review de code**
-
-Chaque PR doit être relue par au moins une personne avant d'être mergée.
-
-En tant que reviewer :
-
-* Vérifier que le code fonctionne et respecte les conventions du projet
-* Poser des questions si quelque chose n'est pas clair
-* Proposer des améliorations de manière constructive
-
-En tant qu'auteur :
-
-* Répondre aux commentaires
-* Effectuer les modifications demandées
-* Demander une nouvelle review si nécessaire
-
-#### 5. **Merge avec squash commit**
-
-Une fois la PR approuvée, on merge en utilisant **"Squash and merge"** sur GitHub. Cela combine tous les commits de la branche en un seul commit sur `main`, ce qui garde un historique propre.
-
-### Bonnes pratiques
-
-* **Synchroniser régulièrement** sa branche avec `main` pour éviter les conflits :
-
-```bash
-git checkout main
-git pull origin main
-git checkout <ta-branche>
-git rebase main
-```
-
-* **Ne jamais pusher directement sur** `**main**`
-* **Garder ses PRs petites** : une PR = une fonctionnalité ou un fix. Les grosses PRs sont difficiles à relire
-* **Tester son code** avant de pousser
-
-### :male_technologist:Éditeur de code
-
-Nous conseillons (surtout pour les débutants) de travailler avec [Visual Studio Code](https://code.visualstudio.com/) (VSCode pour les intimes).
-Voici un [tuto](https://data-for-good.slack.com/archives/C08B329AG7M/p1738330293159749) pour l'usage de VSCode, l’installation de Python, et faire tourner son premier notebook dans VSCode.
-
-Pour les plus avancés, nous conseillons la suite JetBrains, notamment WebStorm et PyCharm en version gratuite.
-
-Pensez à activer le formattage et le fix automatique lors de la sauvegarde :
-
-- [VSCode](.vscode/settings.json)
-- JetBrains : Tools → Actions on Save :
-  - Reformat Code
-  - Optimize Imports
-  - Run eslint --fix
-  - Run Prettier
-
-## Installation des pre-commit hooks
-
-Ce projet utilise [pre-commit](https://pre-commit.com/) pour automatiser la vérification de la qualité du code avant chaque commit.
-
-### Installer pre-commit sur votre machine
-
-#### Via pip
-
-```bash
-pip install pre-commit
-```
-
-### Activer les hooks
-
-```bash
-# À la racine du projet
-pre-commit install
-```
-
-### Configuration
-
-Le projet utilise deux configurations de pre-commit :
-
-1. **Configuration racine** (`.pre-commit-config.yaml`) :
-
-- Exécute les hooks backend et frontend
-- Vérifie les conflits de merge, les fins de ligne, etc.
-
-2. **Configuration backend** (`backend/.pre-commit-config.yaml`) :
-
-- Utilise Ruff pour le linting et le formatting Python
-- Lance les tests unitaires backend avec `uv run pytest weather/tests/unit`
-- Lance les tests d'intégration backend avec `uv run pytest weather/tests/integration`
-- Centralise l'ignore de `DJ001` dans `backend/pyproject.toml`
-
-### Exécution manuelle
-
-Pour exécuter tous les hooks sur tous les fichiers :
-
-```bash
-pre-commit run --all-files
-```
-
-Pour exécuter uniquement les hooks backend :
-
-```bash
-cd backend && uv run pre-commit run --all-files --config=.pre-commit-config.yaml
-```
-
-Pour exécuter uniquement tous les tests backend :
-
-```bash
-cd backend && uv run pytest
-```
-
-Pour exécuter uniquement les tests unitaires backend :
-
-```bash
-cd backend && uv run pytest weather/tests/unit
-```
-
-Pour exécuter uniquement les tests d'intégration backend :
-
-```bash
-cd backend && uv run pytest weather/tests/integration
-```
-
-Pour exécuter uniquement les hooks frontend :
-
-```bash
-cd frontend && npm run check
-```
-
-### Résolution des problèmes courants
-
-#### Problème d'environnement Node.js
-
-Si vous avez des problèmes de dépendances, essayez de supprimer le dossier `node_modules` et de réinstaller :
-
-```bash
-cd frontend
-rm -rf node_modules
-npm ci
-```
-
-### Outils utilisés
-
-- **Backend** : Ruff (linting + formatting) + pytest sur `weather/tests/unit`
-- **Frontend** : ESLint + Prettier
-- **Commun** : vérification des conflits, fins de ligne, etc.
+https://hub.docker.com/hardened-images/catalog/dhi/node/images/node%2Falpine-3.24%2F24-dev/sha256-6fd7e7eae95353eec32cda7d5335597044d81dc5dbb1a8715473523758abf188
+https://hub.docker.com/hardened-images/catalog/dhi/python/images/python%2Fdebian-13%2F3.12-dev/sha256-46e88e66858e29420227016dede467684e99bdd3665e86249013f7b28e0cf4b5
