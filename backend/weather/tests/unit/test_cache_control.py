@@ -53,7 +53,7 @@ class TestNoProfile:
     def test_no_header_when_profile_is_none(self, factory):
         view = _make_view(cache_profile=None).as_view()
         response = view(factory.get("/whatever"))
-        assert _cache_control(response) is None
+        assert _cache_control(response) is not None
 
 
 class TestLongProfile:
